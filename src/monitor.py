@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from http.client import HTTPException
 from ipaddress import IPv4Address
+from math import isfinite
 from queue import Empty, Queue
 from threading import Thread
 from time import monotonic, time
@@ -65,7 +66,8 @@ def _retry_delay(header: Optional[str], default: int) -> float:
     """Interpret HTTP delay-seconds or convert an HTTP date to a delay."""
     value = (header or "").strip()
     if value.isascii() and value.isdecimal():
-        return float(value)
+        delay = float(value)
+        return delay if isfinite(delay) else default
     try:
         instant = parsedate_to_datetime(value)
         if instant.tzinfo is None:

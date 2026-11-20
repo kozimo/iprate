@@ -14,6 +14,8 @@ python3 main.py --help
 
 `--ip` writes a single IPv4 address to standard output. On error, it writes a message to standard error and returns a nonzero exit status. `--help` and `--version` work offline.
 
+Each HTTPS request has a 10-second deadline. Replies are limited to 64 bytes from ipify and 2 MiB from Net.Coffee.
+
 ## Fullscreen mode
 
 The address, status, and refresh timer appear at the top. The Overview tab groups reputation, network, and classification details. On every tab, panels fill the terminal width and share the same height within each row. In History, Datacenter Neighbors spans a full-width row below the other panels. As the terminal narrows, panels move to the next row. Table columns share the available panel width, long values wrap and align to the right, and long lists scroll.

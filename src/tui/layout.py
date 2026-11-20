@@ -62,6 +62,18 @@ def wrap_lines(source: Iterable[Line], width: int) -> List[Line]:
     return rows
 
 
+def diagnostic_rows(line: Line, width: int) -> List[Row]:
+    """Show at most two rows of a diagnostic and mark omitted text."""
+    if width <= 0:
+        return []
+    first, rest = _split(_clean(line.text), width)
+    second, tail = _split(rest, width)
+    if tail:
+        second, _ = _split(rest, width - 1) if width > 1 else ("", "")
+        second += "…"
+    return [[Line(text, line.tone)] for text in (first, second) if text]
+
+
 def pack_fields(source: Iterable[Line], width: int) -> List[Row]:
     """Share rows between fields and move a whole field when it fits alone."""
     rows: List[Row] = []
@@ -231,11 +243,14 @@ def _card(panel: Panel, width: int) -> List[Row]:
         return detail_rows(
             [Line(panel.title, panel.tone), *panel.entries], width
         )
-    title, _ = _split(panel.title, width - 5)
+    title, continuation = _split(panel.title, width - 5)
     top = f"╭─ {title} "
     head = top + "─" * (width - cell_width(top) - 1) + "╮"
     rows = [[Line(head, panel.tone)]]
-    body = detail_rows(panel.entries, width - _FRAME, compact=panel.compact)
+    entries = panel.entries
+    if continuation:
+        entries = [Line(continuation, panel.tone), *entries]
+    body = detail_rows(entries, width - _FRAME, compact=panel.compact)
     for row in body:
         padding = width - 3 - sum(cell_width(part.text) for part in row)
         rows.append(
@@ -354,13 +369,11 @@ def _panel_rows(panels: List[Panel], width: int) -> List[List[Panel]]:
 
 def tab_body(view: Sections, tab: str, width: int) -> List[Row]:
     """Draw rows of panels across the full terminal width."""
-    groups = _panel_rows(view[tab], width)
-    if len(groups) > 1 and len(groups[-1]) == 1 and len(groups[-2]) > 2:
-        previous, last = groups[-2:]
-        pair = _minimum_width(previous[-1]) + _minimum_width(last[0])
-        if not last[0].full_width and pair + len(_GAP) <= width:
-            last.insert(0, previous.pop())
-    return [row for panels in groups for row in _grid_row(panels, width)]
+    return [
+        row
+        for panels in _panel_rows(view[tab], width)
+        for row in _grid_row(panels, width)
+    ]
 
 
 def page(

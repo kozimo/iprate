@@ -13,8 +13,15 @@ try:
 except ImportError:
     curses = None
 
-from .formatters import Line, Sections, TABS, UNKNOWN, sections
-from .layout import Row, cell_width, detail_rows, pack_fields, page, tab_body
+from .formatters import Line, TABS, UNKNOWN, sections
+from .layout import (
+    Row,
+    cell_width,
+    diagnostic_rows,
+    pack_fields,
+    page,
+    tab_body,
+)
 from .. import __version__
 from ..monitor import Monitor
 
@@ -25,7 +32,7 @@ _STATUS_TONES = {
     "CONNECTION ERROR": "bad",
     "RATE LIMITED": "warn",
 }
-_ASCII_GLYPHS = str.maketrans("╭╮╰╯│─█░·—", "++++|-#.:-")
+_ASCII_GLYPHS = str.maketrans("╭╮╰╯│─█░·—…", "++++|-#.:-.")
 
 
 @dataclass
@@ -83,16 +90,13 @@ def _headings(
             "muted",
         ),
     ]
-    diagnostic = []
+    headings = pack_fields(fields, width) + _tabs(tab, width)
     if snapshot and monitor.address != snapshot.address:
-        diagnostic.append(Line(f"STALE data for {snapshot.address}", "warn"))
+        stale = Line(f"STALE data for {snapshot.address}", "warn")
+        headings.extend(pack_fields([stale], width))
     if monitor.problem:
-        diagnostic.append(Line(monitor.problem, "warn"))
-    return (
-        pack_fields(fields, width)
-        + _tabs(tab, width)
-        + detail_rows(diagnostic, width)
-    )
+        headings.extend(diagnostic_rows(Line(monitor.problem, "warn"), width))
+    return headings
 
 
 def _keys(width: int, scrolls: bool) -> Row:
@@ -168,7 +172,7 @@ def _paint(
 def _draw(
     window: curses.window,
     monitor: Monitor,
-    view: Sections,
+    body: List[Row],
     nav: _Navigation,
     countdown: str,
     styles: Dict[str, int],
@@ -184,7 +188,6 @@ def _draw(
             window.addnstr(0, 0, "Enlarge terminal (q quits)", width - 1)
         return
 
-    body = tab_body(view, tab, width)
     visible, nav.offset, nav.last = page(body, space, nav.offset)
     _paint(window, header + visible + [_keys(width - 1, nav.last > 0)], styles)
 
@@ -214,26 +217,28 @@ def _loop(window: curses.window) -> None:
     window.timeout(150)
     styles = _palette()
     monitor = Monitor()
-    snapshot = None
-    view = sections(snapshot)
     nav = _Navigation()
     frame = None
+    layout = None
+    body: List[Row] = []
 
     key = -1
     while key not in (ord("q"), ord("Q")):
         _handle(key, nav, monitor)
         monitor.poll()
-        if snapshot is not monitor.snapshot:
-            snapshot = monitor.snapshot
-            view = sections(snapshot)
+        snapshot = monitor.snapshot
         countdown = (
             "Updating" if monitor.busy else _duration(monitor.remaining)
         )
+        size = window.getmaxyx()
+        current_layout = id(snapshot), nav.tab, size[1]
+        if current_layout != layout:
+            body = tab_body(sections(snapshot), TABS[nav.tab], size[1])
+            layout = current_layout
         current = (
-            window.getmaxyx(),
-            nav.tab,
+            size[0],
+            current_layout,
             nav.offset,
-            id(snapshot),
             monitor.address,
             monitor.status,
             monitor.changed,
@@ -242,7 +247,7 @@ def _loop(window: curses.window) -> None:
             monitor.interval,
         )
         if current != frame:
-            _draw(window, monitor, view, nav, countdown, styles)
+            _draw(window, monitor, body, nav, countdown, styles)
             window.refresh()
             frame = current
 
