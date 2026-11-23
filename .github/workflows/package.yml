@@ -106,6 +106,7 @@ jobs:
           import os
           import subprocess
           from pathlib import Path
+          from tempfile import TemporaryDirectory
 
           windows = os.name == 'nt'
           command = Path(os.environ['UV_TOOL_BIN_DIR'], 'iprate.exe' if windows else 'iprate')
@@ -115,16 +116,27 @@ jobs:
 
           tool_env = Path(os.environ['UV_TOOL_DIR'], 'iprate')
           python = tool_env / ('Scripts/python.exe' if windows else 'bin/python')
-          imports = 'import curses, iprate.api, iprate.cli, iprate.tui.screen'
+          smoke_test = (
+              'import sys\n'
+              'import curses, iprate.cli, iprate.tui.screen\n'
+              'from iprate.api import _read\n'
+              'assert _read(sys.argv[1], 64) == b"192.0.2.1"\n'
+          )
           if windows:
-              imports += '\nfrom importlib.metadata import version\nprint(version("windows-curses"))'
-          subprocess.run([python, '-I', '-c', imports], check=True)
+              smoke_test += 'from importlib.metadata import version\nprint(version("windows-curses"))\n'
+          with TemporaryDirectory() as directory:
+              response = Path(directory, 'ipify.txt').resolve()
+              response.write_bytes(b'192.0.2.1')
+              subprocess.run([python, '-I', '-c', smoke_test, response.as_uri()], check=True)
           PY
 
   release:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: install
     runs-on: ubuntu-24.04
+    concurrency:
+      group: iprate-release
+      queue: max
     permissions:
       contents: write
     steps:
@@ -136,6 +148,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release/iprate.tar.gz \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --title "iprate $GITHUB_REF_NAME" --generate-notes --latest
+          python3 -I - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          def version(tag):
+              parts = re.fullmatch(r'v([0-9]+)\.([0-9]+)\.([0-9]+)', tag)
+              return tuple(map(int, parts.groups())) if parts else None
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          tag = os.environ['GITHUB_REF_NAME']
+          current = version(tag)
+          assert current is not None, tag
+          published = subprocess.check_output([
+              'gh', 'api', f'repos/{repo}/releases', '--paginate', '--jq',
+              '.[] | select(.draft == false and .prerelease == false) | .tag_name',
+          ], text=True)
+          stable = (number for number in map(version, published.splitlines()) if number is not None)
+          latest = current > max(stable, default=(-1, -1, -1))
+          subprocess.run([
+              'gh', 'release', 'create', tag, 'release/iprate.tar.gz',
+              '--repo', repo, '--verify-tag', '--title', f'iprate {tag}',
+              '--generate-notes', '--latest' if latest else '--latest=false',
+          ], check=True)
+          PY
