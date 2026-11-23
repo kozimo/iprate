@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iprate"
+description = "Check the reputation of your public IPv4 address."
+readme = "README.md"
+requires-python = ">=3.8"
+dynamic = ["version"]
+dependencies = [
+    "windows-curses; platform_system == 'Windows'",
+]
+
+[project.scripts]
+iprate = "iprate.cli:run"
+
+[tool.setuptools]
+packages = ["iprate", "iprate.tui"]
+
+[tool.setuptools.package-dir]
+iprate = "src"
+
+[tool.setuptools.dynamic]
+version = { attr = "iprate.__version__" }

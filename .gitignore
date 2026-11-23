@@ -5,3 +5,7 @@ __pycache__/
 .serena
 
 *.pyc
+
+/build/
+/dist/
+/iprate.egg-info/
