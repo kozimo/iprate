@@ -3,12 +3,16 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from unicodedata import normalize
 
 from ..models import Snapshot
 
 TABS = ("Overview", "Geography", "History")
 UNKNOWN = "Unknown"
+_MAX_RECORDS = 200
+_MAX_TEXT = 512
+_MAX_TABLE_TEXT = 128
 
 _VPN_NOTE = (
     "The source lists this IP in a VPN exit pool based on its company or ASN."
@@ -82,7 +86,7 @@ class Panel:
     """A titled frame and its fields, notes, or tables."""
 
     title: str
-    entries: List[Entry]
+    entries: Sequence[Entry]
     tone: str = "accent"
     compact: bool = False
     full_width: bool = False
@@ -92,9 +96,14 @@ Sections = Dict[str, List[Panel]]
 
 
 def _text(value: Any) -> str:
-    if isinstance(value, str) and value.strip():
-        return _TRANSLATIONS.get(value.strip(), value.strip())
-    return UNKNOWN
+    if not isinstance(value, str):
+        return UNKNOWN
+    value = normalize("NFC", value.strip())
+    return _abbreviate(_TRANSLATIONS.get(value, value) or UNKNOWN, _MAX_TEXT)
+
+
+def _abbreviate(value: str, limit: int) -> str:
+    return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
 def _number(value: Any) -> str:
@@ -121,9 +130,9 @@ def _risk_flag(label: str, value: Any, present: str, absent: str) -> Field:
 def _risk_score(label: str, value: Any) -> Field:
     """Use a level supplied alone or in a score such as '0.0625 (High)'."""
     text = _score(value)
-    level = text
-    if text.endswith(")"):
-        level = text[:-1].rpartition("(")[2]
+    level = value.strip() if isinstance(value, str) else text
+    if level.endswith(")"):
+        level = level[:-1].rpartition("(")[2]
     return Field(label, text, _LEVEL_TONES.get(_text(level).lower(), ""))
 
 
@@ -195,7 +204,7 @@ def _summary(raw: Fields, intel: Fields) -> List[Field]:
 
 
 def _threats(intel: Fields) -> List[Entry]:
-    rows = []
+    rows: List[Entry] = []
     roles = {
         "warn": ("Warning", "warn"),
         "warning": ("Warning", "warn"),
@@ -204,13 +213,15 @@ def _threats(intel: Fields) -> List[Entry]:
         "critical": ("Critical", "bad"),
         "info": ("Info", ""),
     }
-    for item in _list(intel.get("threats")):
+    items = _list(intel.get("threats"))
+    for item in items[:_MAX_RECORDS]:
         threat = _object(item)
         label = _text(threat.get("label"))
         severity = _text(threat.get("severity"))
         if label != UNKNOWN:
             text, tone = roles.get(severity.lower(), (severity, ""))
             rows.append(Field(label, text, tone))
+    rows.extend(_omitted_records(items))
     return rows or [Line("None" if intel.get("threats") == [] else UNKNOWN)]
 
 
@@ -330,21 +341,36 @@ def _geography(raw: Fields) -> List[Panel]:
         ),
     )
     return [
-        Panel("LOCATION", list(fields)),
-        Panel("GEOGRAPHIC SOURCES", [sources], "network"),
+        Panel("LOCATION", fields),
+        Panel("GEOGRAPHIC SOURCES", sources, "network"),
     ]
 
 
-def _records(raw: Fields, key: str, fields: Tuple[FieldSpec, ...]) -> Entry:
-    """Preserve each record's field order and render a shared table header."""
+def _omitted_records(items: List[Any]) -> List[Entry]:
+    """Show how many source records are past the display limit."""
+    omitted = len(items) - _MAX_RECORDS
+    if omitted > 0:
+        return [Line(f"… Omitted records ({omitted})", "muted")]
+    return []
+
+
+def _records(
+    raw: Fields, key: str, fields: Tuple[FieldSpec, ...]
+) -> List[Entry]:
+    """Keep the first records in order and indicate when others are omitted."""
+    items = _list(raw.get(key))
     rows = [
-        tuple(convert(item.get(field)) for field, _, convert in fields)
-        for item in _list(raw.get(key))
+        tuple(
+            _abbreviate(convert(item.get(field)), _MAX_TABLE_TEXT)
+            for field, _, convert in fields
+        )
+        for item in items[:_MAX_RECORDS]
         if isinstance(item, dict)
     ]
-    if not rows:
-        return Line("None" if raw.get(key) == [] else UNKNOWN)
-    return Table(tuple(label for _, label, _ in fields), rows)
+    content = _omitted_records(items)
+    if rows:
+        content.insert(0, Table(tuple(label for _, label, _ in fields), rows))
+    return content or [Line("None" if raw.get(key) == [] else UNKNOWN)]
 
 
 def _history(raw: Fields) -> List[Panel]:
@@ -376,14 +402,16 @@ def _history(raw: Fields) -> List[Panel]:
             ),
         ),
     ):
-        record = _records(raw, key, fields + (time_field,))
-        panels.append(Panel(title.upper(), [record], compact=True))
-    domains = [
+        records = _records(raw, key, fields + (time_field,))
+        panels.append(Panel(title.upper(), records, compact=True))
+    items = _list(raw.get("related_domains"))
+    domains = (
         _text(item.get("domain") if isinstance(item, dict) else item)
-        for item in _list(raw.get("related_domains"))
-    ]
+        for item in items[:_MAX_RECORDS]
+    )
     rows: List[Entry] = [Line(value) for value in domains if value != UNKNOWN]
-    if not any(value != UNKNOWN for value in domains):
+    rows.extend(_omitted_records(items))
+    if not rows:
         rows.append(
             Line("None" if raw.get("related_domains") == [] else UNKNOWN)
         )
@@ -400,7 +428,7 @@ def _history(raw: Fields) -> List[Panel]:
             time_field,
         ),
     )
-    panels.append(Panel("DATACENTER NEIGHBORS", [neighbors], full_width=True))
+    panels.append(Panel("DATACENTER NEIGHBORS", neighbors, full_width=True))
     return panels
 
 
@@ -419,16 +447,27 @@ def _reputation(raw: Fields) -> List[Entry]:
     )
 
 
-def sections(snapshot: Optional[Snapshot]) -> Sections:
-    """Build panels for the three tabs without modifying the source payload."""
-    raw = snapshot.raw if snapshot else {}
+def _overview(raw: Fields) -> List[Panel]:
+    """Build the three panels on the Overview tab."""
     verdict = _object(raw.get("ai_verdict"))
-    return {
-        "Overview": [
-            Panel("REPUTATION", _reputation(raw)),
-            Panel("NETWORK", list(_network(raw)), "network"),
-            Panel("CLASSIFICATION", _classification(raw, verdict), "classify"),
-        ],
-        "Geography": _geography(raw),
-        "History": _history(raw),
-    }
+    return [
+        Panel("REPUTATION", _reputation(raw)),
+        Panel("NETWORK", _network(raw), "network"),
+        Panel("CLASSIFICATION", _classification(raw, verdict), "classify"),
+    ]
+
+
+_SECTION_BUILDERS = {
+    "Overview": _overview,
+    "Geography": _geography,
+    "History": _history,
+}
+
+
+def sections(
+    snapshot: Optional[Snapshot], tab: Optional[str] = None
+) -> Sections:
+    """Build panels for one tab or all three without changing the payload."""
+    raw = snapshot.raw if snapshot else {}
+    tabs = (tab,) if tab is not None else TABS
+    return {name: _SECTION_BUILDERS[name](raw) for name in tabs}

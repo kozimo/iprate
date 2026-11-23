@@ -2,7 +2,7 @@
 
 from itertools import zip_longest
 from typing import Iterable, List, Optional, Sequence, Tuple
-from unicodedata import category, combining, east_asian_width
+from unicodedata import category, combining, east_asian_width, normalize
 
 from .formatters import Entry, Field, Line, Panel, Sections, Table
 
@@ -21,14 +21,14 @@ def _cell(char: str) -> int:
 
 def cell_width(text: str) -> int:
     """Return the number of cells used by ordinary terminal text."""
-    return sum(map(_cell, text))
+    return sum(map(_cell, normalize("NFC", text)))
 
 
 def _clean(text: str) -> str:
-    return "".join(
-        char if category(char) not in ("Cc", "Cf", "Cs") else " "
-        for char in text
-    ).strip()
+    visible = (
+        " " if category(char) in ("Cc", "Cf", "Cs") else char for char in text
+    )
+    return normalize("NFC", "".join(visible).strip())
 
 
 def _split(text: str, limit: int) -> Tuple[str, str]:

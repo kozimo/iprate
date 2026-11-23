@@ -233,7 +233,8 @@ def _loop(window: curses.window) -> None:
         size = window.getmaxyx()
         current_layout = id(snapshot), nav.tab, size[1]
         if current_layout != layout:
-            body = tab_body(sections(snapshot), TABS[nav.tab], size[1])
+            tab = TABS[nav.tab]
+            body = tab_body(sections(snapshot, tab), tab, size[1])
             layout = current_layout
         current = (
             size[0],

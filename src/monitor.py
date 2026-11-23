@@ -47,12 +47,13 @@ def _refresh(results: "Queue[_Result]") -> None:
 def _failure(
     address: Optional[IPv4Address], source: str, error: Exception
 ) -> _Result:
-    """Classify a source error while preserving HTTP 429 metadata."""
+    """Classify a source error and retain any server-directed retry delay."""
     message = f"{source}: {error}"
-    if isinstance(error, HTTPError) and error.code == 429:
+    if isinstance(error, HTTPError) and error.code in (429, 503):
         retry = error.headers.get("Retry-After") if error.headers else None
+        status = "RATE LIMITED" if error.code == 429 else "API ERROR"
         return _Result(
-            address, status="RATE LIMITED", problem=message, retry_after=retry
+            address, status=status, problem=message, retry_after=retry
         )
     status = (
         "API ERROR"
@@ -151,7 +152,7 @@ class Monitor:
         self.status = result.status
         self.problem = result.problem
         self._due = now + self.interval
-        if result.status == "RATE LIMITED":
+        if result.status == "RATE LIMITED" or result.retry_after is not None:
             self._blocked_until = now + _retry_delay(
                 result.retry_after, self.interval
             )

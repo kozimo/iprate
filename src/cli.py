@@ -39,7 +39,9 @@ def run() -> None:
     try:
         address = get_public_ipv4()
     except (OSError, HTTPException, InvalidResponse) as error:
-        parser.exit(1, f"iprate: ipify: {error}\n")
+        text = str(error)
+        message = "".join(char if char.isprintable() else " " for char in text)
+        parser.exit(1, f"iprate: ipify: {message}\n")
     except KeyboardInterrupt:
         parser.exit(130, "iprate: Interrupted.\n")
 
