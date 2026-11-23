@@ -10,7 +10,9 @@ In fullscreen mode, `iprate` sends that address to Net.Coffee, which provides th
 
 ## Installation
 
-Installing and updating `iprate` from GitHub Releases requires `uv`.
+Both installation methods use `uv`. `iprate` requires Python 3.8 or newer.
+
+On Windows x86-64, use a CPython version with a matching `windows-curses` wheel. `uv` installs this dependency automatically. If your Python version lacks a matching wheel, add `--python 3.13` to the install command. [Available `windows-curses` wheels](https://pypi.org/project/windows-curses/#files)
 
 ### Install uv
 
@@ -28,31 +30,42 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 Open a new terminal and run `uv --version` to verify the installation. For Homebrew, WinGet, and other methods, see the [official uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
-### Install iprate
-
-On Linux or macOS, run the following command.
+### Install from GitHub Releases
 
 ```bash
 uv tool install "iprate @ https://github.com/kozimo/iprate/releases/latest/download/iprate.tar.gz"
 ```
 
-On Windows x86-64, use PowerShell and request CPython 3.13, for which a `windows-curses` wheel is available. uv installs `windows-curses` automatically on Windows and downloads Python if needed.
+Run `iprate` for the fullscreen interface or `iprate --ip` for the address alone. If your shell cannot find `iprate`, run `uv tool update-shell` and open a new terminal. If you previously installed a zipapp, check `command -v iprate` or `Get-Command iprate` and remove the old archive if it takes precedence.
 
-```powershell
-uv tool install --python 3.13 "iprate @ https://github.com/kozimo/iprate/releases/latest/download/iprate.tar.gz"
+### Build and install from a clone
+
+With Git and `uv` installed, clone the repository and build a wheel. The same commands work in Bash and PowerShell.
+
+```bash
+git clone https://github.com/kozimo/iprate.git
+cd iprate
+uv build --wheel --no-sources
 ```
 
-Run `iprate` for the fullscreen interface or `iprate --ip` for the address alone. If your shell cannot find `iprate`, run `uv tool update-shell` and open a new terminal. If you previously installed a zipapp, check `command -v iprate` or `Get-Command iprate` and remove the old archive if it takes precedence.
+Pass the path printed by `uv build` to `uv tool install`. The example below uses the wheel for version `0.1.0`.
+
+```bash
+uv tool install ./dist/iprate-0.1.0-py3-none-any.whl
+iprate --version
+```
 
 ## Updates
 
-To apply the upgrade, run this command.
+If you installed from GitHub Releases, run this command to upgrade.
 
 ```bash
 uv tool upgrade iprate
 ```
 
 `uv` checks the same GitHub URL for upgrades. If the version and dependencies are already current, it reports `Nothing to upgrade`. It may still download and build the archive to check its version, and it can upgrade dependencies independently.
+
+If you installed a local wheel, pull the changes, rebuild the wheel, and run the local install command with `--reinstall` and the new wheel path.
 
 ## Usage
 
